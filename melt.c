@@ -69,8 +69,12 @@ int main(int argc, char *argv[])
 	while ((c = getopt(argc, argv, "t:i:o:")) != EOF) {
 		switch (c) {
 		case 't':
-			printf("Not yet implemented.\n");
-			exit(EXIT_SUCCESS);
+			ret = snprintf(old_img_tmp, PATH_MAX, "%s/unify_XXXXXX", optarg);
+			if (ret < 0 || ret >= PATH_MAX)
+				exit(EXIT_FAILURE);
+			ret = snprintf(new_img_tmp, PATH_MAX, "%s/unify_XXXXXX", optarg);
+			if (ret < 0 || ret >= PATH_MAX)
+				exit(EXIT_FAILURE);
 			break;
 		case 'i':
 			image = optarg;
