@@ -261,10 +261,6 @@ static int merge_layers(const char *image_out, const char *old_img_tmp, char *ne
 	if (file_tar(new_img_tmp, image_out) < 0)
 		goto out_remove_tmp;
 
-	// /* tar back into a useable docker image */
-	// if (file_tar(old_img_tmp, image_out) < 0)
-	// 	goto out_remove_tmp;
-
 	ret = 0;
 
 out_remove_tmp:
