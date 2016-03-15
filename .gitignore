@@ -1,3 +1,4 @@
 reservoir.c
 *.o
 melt
+*.*
