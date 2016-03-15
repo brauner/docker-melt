@@ -245,6 +245,10 @@ static int merge_layers(const char *image_out, const char *old_img_tmp, char *ne
 	 * extracted the parent.) */
 	for (i = 0; i < len - 1; i++) {
 		child = find_child(cur->id);
+		if (!child) {
+			fprintf(stderr, "Invalid json file.\n");
+			goto out_remove_tmp;
+		}
 
 		if (file_untar(child->tar_path, new_img_tmp) < 0)
 			goto out_remove_tmp;

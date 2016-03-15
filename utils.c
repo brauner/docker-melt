@@ -136,8 +136,6 @@ int recursive_rmdir(char *dirname)
 		err = true;
 
 	closedir(dir);
-	if (ret)
-		err = true;
 
 	return err ? -1 : 0;
 }
