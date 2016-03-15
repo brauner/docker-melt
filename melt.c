@@ -138,36 +138,35 @@ int main(int argc, char *argv[])
 
 static char *extract_field(const char *field, const char *json)
 {
-	char *ret;
+	char *dup = NULL, *parent = NULL, *ret = NULL;
+	size_t field_len;
+
 	// field"1243sadf134fdsa13fd"
-	char *dup = malloc(strlen(json) + 1);
+	dup = malloc(strlen(json) + 1);
 	if (!dup)
-		return NULL;
+		goto out;
 	char *end = stpcpy(dup, json);
 
-	char *parent = strstr(dup, field);
-	if (!parent) {
-		free(dup);
-		return NULL;
-	}
+	parent = strstr(dup, field);
+	if (!parent)
+		goto out;
 
+	field_len = strlen(field);
 	// paranoid: check if we would point beyond the end of dup
-	if ((parent + strlen(field) + 1) > end) {
-		free(dup);
-		return NULL;
-	}
-	parent = parent + strlen(field) + 1;
+	if ((parent + field_len + 1) > end)
+		goto out;
+
+	parent = parent + field_len + 1;
 	// 1243sadf134fdsa13fd"
 
 	// \"
 	char *tmp = strchr(parent, '\"');
-	if (!tmp) {
-		free(dup);
-		return NULL;
-	}
+	if (!tmp)
+		goto out;
 	*tmp = '\0';
 
 	ret = strdup(parent);
+out:
 	free(dup);
 	return ret ;
 }
