@@ -58,10 +58,10 @@ int file_tar(const char *from, const char *to)
 		return -1;
 
 	if (!pid) {
-		execlp("tar", "tar", "--xattrs", "--same-owner",
+		execlp("tar", "tar", "--acls", "--xattrs", "--same-owner",
 		       "--numeric-owner", "--preserve-permissions",
-		       "--atime-preserve=system", "-C", from, "-cf", to, ".",
-		       (char *)NULL);
+		       "--atime-preserve=system", "-S", "-C", from, "-cf", to,
+		       ".", (char *)NULL);
 		return -1; // should not happen
 	}
 
@@ -78,9 +78,10 @@ int file_untar(const char *from, const char *to)
 		return -1;
 
 	if (!pid) {
-		execlp("tar", "tar", "--overwrite", "--xattrs", "--same-owner",
+		execlp("tar", "tar", "--overwrite", "--acls", "--xattrs",
+		       "--xattrs-include='*'", "--same-owner",
 		       "--numeric-owner", "--preserve-permissions",
-		       "--atime-preserve=system", "-xf", from, "-C", to,
+		       "--atime-preserve=system", "-S", "-xf", from, "-C", to,
 		       (char *)NULL);
 		return -1; // should not happen
 	}
