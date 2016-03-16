@@ -53,7 +53,7 @@ static void free_layer_list(void);
 static bool is_json(const char *file);
 static struct layer *find_child(const char *id);
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char *new_img_tmp, bool del_whiteout);
+			char *new_img_tmp, bool del_whiteout, bool compress);
 static int open_layer_dir(const char *path);
 static void usage(const char *name);
 
@@ -63,12 +63,15 @@ int main(int argc, char *argv[])
 	int c, ret, fret = -1;
 	size_t len;
 	char *image = NULL, *image_out = NULL, *path = NULL;
-	bool del_whiteout = false;
+	bool del_whiteout = false, compress = false;
 	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 	char new_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 
-	while ((c = getopt(argc, argv, "wt:i:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "cwt:i:o:")) != EOF) {
 		switch (c) {
+		case 'c':
+			compress = true;
+			break;
 		case 'w':
 			del_whiteout = true;
 			break;
@@ -119,7 +122,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (merge_layers(image_out, old_img_tmp, new_img_tmp, del_whiteout) < 0) {
+	if (merge_layers(image_out, old_img_tmp, new_img_tmp, del_whiteout, compress) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
 		goto out;
 	}
@@ -216,7 +219,7 @@ static bool is_json(const char *file)
 }
 
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char *new_img_tmp, bool del_whiteout)
+			char *new_img_tmp, bool del_whiteout, bool compress)
 {
 	int ret = -1;
 	size_t i;
@@ -272,7 +275,7 @@ static int merge_layers(const char *image_out, const char *old_img_tmp,
 
 	/* tar into one single layer and overwrite current topmost layer of the
 	 * youngest child. */
-	if (file_tar(new_img_tmp, image_out) < 0)
+	if (file_tar(new_img_tmp, image_out, compress) < 0)
 		goto out_remove_tmp;
 
 	ret = 0;
@@ -412,7 +415,7 @@ cleanup_on_error:
 
 static void usage(const char *name)
 {
-	printf("usage: %s -i <input-image> -o <output-image> [-t <temporary-folder> ] [-w]\n", name);
+	printf("usage: %s -i <input-image> -o <output-image> [-t <temporary-folder> ] [-w] [-c]\n", name);
 	printf("\n");
 	printf("-i <input-image>\n");
 	printf("	Specify the location of the image.\n");
@@ -422,6 +425,8 @@ static void usage(const char *name)
 	printf("	Specify a location where temporary files produced by this executable are stored.\n");
 	printf("-w\n");
 	printf("	Delete whiteouts in final rootfs.\n");
+	printf("-c\n");
+	printf("	Compress tar file through xz.\n");
 	printf("\n");
 	exit(EXIT_FAILURE);
 }
