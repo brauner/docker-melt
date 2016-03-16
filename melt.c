@@ -93,6 +93,10 @@ int main(int argc, char *argv[])
 	if (!mkdtemp(old_img_tmp)) {
 		exit(EXIT_FAILURE);
 	}
+	if (chmod(old_img_tmp, 0755) < 0) {
+		recursive_rmdir(old_img_tmp);
+		exit(EXIT_FAILURE);
+	}
 
 	len = strlen(old_img_tmp) + strlen(image) + 1 /* / */;
 	path = malloc(len + 1);
@@ -232,6 +236,8 @@ static int merge_layers(const char *image_out, const char *old_img_tmp, char *ne
 
 	if (!mkdtemp(new_img_tmp))
 		return -1;
+	if (chmod(new_img_tmp, 0755) < 0)
+		goto out_remove_tmp;
 
 	// root ancestor
 	if (file_untar(cur->tar_path, new_img_tmp) < 0)
