@@ -20,6 +20,7 @@
 #define __LAYER_UTILS_H
 
 #include <stdio.h>
+#include <stdbool.h>
 
 struct mapped_file {
 	char *buf;
@@ -30,9 +31,11 @@ struct mapped_file {
 extern char *append_paths(const char *pre, const char *post);
 extern int file_tar(const char *from, const char *to);
 extern int file_untar(const char *from, const char *to);
+extern char *is_whiteout(char *file);
 extern int mmap_file_as_str(const char *file, struct mapped_file *m);
 extern int munmap_file_as_str(struct mapped_file *m);
 extern int recursive_rmdir(char *dirname);
 extern int wait_for_pid(pid_t pid);
+extern int delete_whiteouts(const char *path);
 
 #endif // __LAYER_UTILS_H
