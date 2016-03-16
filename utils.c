@@ -51,7 +51,7 @@ char *append_paths(const char *pre, const char *post)
 	return prepost;
 }
 
-int file_tar(const char *from, const char *to)
+int file_tar(const char *from, const char *to, bool compress)
 {
 	pid_t pid = fork();
 	if (pid < 0)
@@ -60,8 +60,8 @@ int file_tar(const char *from, const char *to)
 	if (!pid) {
 		execlp("tar", "tar", "--acls", "--xattrs", "--same-owner",
 		       "--numeric-owner", "--preserve-permissions",
-		       "--atime-preserve=system", "-S", "-C", from, "-cf", to,
-		       ".", (char *)NULL);
+		       "--atime-preserve=system", "-S", "-C", from,
+		       compress ? "-cJf" : "-cf", to, ".", (char *)NULL);
 		return -1; // should not happen
 	}
 
