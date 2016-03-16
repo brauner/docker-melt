@@ -412,14 +412,16 @@ cleanup_on_error:
 
 static void usage(const char *name)
 {
-	printf("usage: %s [-i <input-image> ] [-o <output-image>] [-t <temporary-folder> ]\n", name);
+	printf("usage: %s -i <input-image> -o <output-image> [-t <temporary-folder> ] [-w]\n", name);
 	printf("\n");
-	printf("-i <input-image>");
-	printf("	Specify the location of the image\n");
-	printf("-o <output-image>");
-	printf("	Specify where to store the new image\n");
-	printf("-t <temporary-folder>");
-	printf("	Specify a location where temporary files produced by this executable are stored\n");
+	printf("-i <input-image>\n");
+	printf("	Specify the location of the image.\n");
+	printf("-o <output-image>\n");
+	printf("	Specify where to store the new image.\n");
+	printf("-t <temporary-folder>\n");
+	printf("	Specify a location where temporary files produced by this executable are stored.\n");
+	printf("-w\n");
+	printf("	Delete whiteouts in final rootfs.\n");
 	printf("\n");
 	exit(EXIT_FAILURE);
 }
