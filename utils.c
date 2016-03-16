@@ -19,12 +19,15 @@
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 
 #include "utils.h"
@@ -55,7 +58,10 @@ int file_tar(const char *from, const char *to)
 		return -1;
 
 	if (!pid) {
-		execlp("tar", "tar", "-C", from, "-cf", to, ".", (char *)NULL);
+		execlp("tar", "tar", "--xattrs", "--same-owner",
+		       "--numeric-owner", "--preserve-permissions",
+		       "--atime-preserve=system", "-C", from, "-cf", to, ".",
+		       (char *)NULL);
 		return -1; // should not happen
 	}
 
@@ -72,12 +78,61 @@ int file_untar(const char *from, const char *to)
 		return -1;
 
 	if (!pid) {
-		execlp("tar", "tar", "--overwrite", "--xattrs", "--same-owner", "--preserve-permissions", "-xf", from, "-C", to, (char *)NULL);
+		execlp("tar", "tar", "--overwrite", "--xattrs", "--same-owner",
+		       "--numeric-owner", "--preserve-permissions",
+		       "--atime-preserve=system", "-xf", from, "-C", to,
+		       (char *)NULL);
 		return -1; // should not happen
 	}
 
 	if (wait_for_pid(pid) < 0)
 		return -1;
+
+	return 0;
+}
+
+int mmap_file_as_str(const char *file, struct mapped_file *m)
+{
+	char *buf = NULL;
+	struct stat fbuf;
+
+	// open file
+	if ((m->fd = open(file, O_RDWR | O_CLOEXEC)) < 0)
+		return -1;
+
+	if (fstat(m->fd, &fbuf) < 0)
+		goto out;
+
+	if (!fbuf.st_size)
+		goto out;
+
+	/* write terminating \0-byte to file.
+	 * (mmap()ed memory is only null terminated when the
+	 * filesize is not a multiple of the pagesize.) */
+	if (pwrite(m->fd, "", 1, fbuf.st_size) <= 0)
+		goto out;
+
+	/* MAP_PRIVATE we don't care about changing the
+	 * underlying file just yet. */
+	buf = mmap(NULL, fbuf.st_size + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE, m->fd, 0);
+	if (buf == MAP_FAILED) {
+		ftruncate(m->fd, fbuf.st_size);
+		goto out;
+	}
+	m->buf = buf;
+	m->len = fbuf.st_size + 1;
+	return 0;
+
+out:
+	close(m->fd);
+	return -1;
+}
+
+int munmap_file_as_str(struct mapped_file *m)
+{
+	munmap(m->buf, m->len + 1);
+	ftruncate(m->fd, m->len);
+	close(m->fd);
 
 	return 0;
 }
@@ -130,8 +185,6 @@ int recursive_rmdir(char *dirname)
 		err = true;
 
 	closedir(dir);
-	if (ret)
-		err = true;
 
 	return err ? -1 : 0;
 }

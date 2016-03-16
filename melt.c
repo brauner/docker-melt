@@ -93,6 +93,10 @@ int main(int argc, char *argv[])
 	if (!mkdtemp(old_img_tmp)) {
 		exit(EXIT_FAILURE);
 	}
+	if (chmod(old_img_tmp, 0755) < 0) {
+		recursive_rmdir(old_img_tmp);
+		exit(EXIT_FAILURE);
+	}
 
 	len = strlen(old_img_tmp) + strlen(image) + 1 /* / */;
 	path = malloc(len + 1);
@@ -138,36 +142,35 @@ int main(int argc, char *argv[])
 
 static char *extract_field(const char *field, const char *json)
 {
-	char *ret;
+	char *dup = NULL, *parent = NULL, *ret = NULL;
+	size_t field_len;
+
 	// field"1243sadf134fdsa13fd"
-	char *dup = malloc(strlen(json) + 1);
+	dup = malloc(strlen(json) + 1);
 	if (!dup)
-		return NULL;
+		goto out;
 	char *end = stpcpy(dup, json);
 
-	char *parent = strstr(dup, field);
-	if (!parent) {
-		free(dup);
-		return NULL;
-	}
+	parent = strstr(dup, field);
+	if (!parent)
+		goto out;
 
+	field_len = strlen(field);
 	// paranoid: check if we would point beyond the end of dup
-	if ((parent + strlen(field) + 1) > end) {
-		free(dup);
-		return NULL;
-	}
-	parent = parent + strlen(field) + 1;
+	if ((parent + field_len + 1) > end)
+		goto out;
+
+	parent = parent + field_len + 1;
 	// 1243sadf134fdsa13fd"
 
 	// \"
 	char *tmp = strchr(parent, '\"');
-	if (!tmp) {
-		free(dup);
-		return NULL;
-	}
+	if (!tmp)
+		goto out;
 	*tmp = '\0';
 
 	ret = strdup(parent);
+out:
 	free(dup);
 	return ret ;
 }
@@ -233,6 +236,8 @@ static int merge_layers(const char *image_out, const char *old_img_tmp, char *ne
 
 	if (!mkdtemp(new_img_tmp))
 		return -1;
+	if (chmod(new_img_tmp, 0755) < 0)
+		goto out_remove_tmp;
 
 	// root ancestor
 	if (file_untar(cur->tar_path, new_img_tmp) < 0)
@@ -246,6 +251,10 @@ static int merge_layers(const char *image_out, const char *old_img_tmp, char *ne
 	 * extracted the parent.) */
 	for (i = 0; i < len - 1; i++) {
 		child = find_child(cur->id);
+		if (!child) {
+			fprintf(stderr, "Invalid json file.\n");
+			goto out_remove_tmp;
+		}
 
 		if (file_untar(child->tar_path, new_img_tmp) < 0)
 			goto out_remove_tmp;
@@ -270,14 +279,13 @@ out_remove_tmp:
 
 static int open_layer_dir(const char *path)
 {
-	int fd;
-	struct stat fbuf;
-	char *buf = NULL, *tar_path = NULL, *parent = NULL, *id = NULL,
-	     *json = NULL, *newpath = NULL;
+	char *tar_path = NULL, *parent = NULL, *id = NULL, *json = NULL,
+	     *newpath = NULL;
 	struct list *new_lnode;
 	struct layer *new_layer;
 	struct dirent dirent, *direntp;
 	struct dirent layerdirent, *layerdirentp;
+	struct mapped_file m;
 	DIR *dir;
 
 	// open global directory
@@ -328,58 +336,21 @@ static int open_layer_dir(const char *path)
 				goto cleanup_on_error;
 			}
 
-			// open json file
-			if ((fd = open(json, O_RDWR | O_CLOEXEC)) < 0) {
-				closedir(layerdir);
+			if (mmap_file_as_str(json, &m) < 0)
 				goto cleanup_on_error;
-			}
-
-			if (fstat(fd, &fbuf) < 0) {
-				close(fd);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			if (!fbuf.st_size) {
-				close(fd);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			/* write terminating \0-byte to file.
-			 * (mmap()ed memory is only null terminated when the
-			 * filesize is not a multiple of the pagesize.) */
-			if (pwrite(fd, "", 1, fbuf.st_size) <= 0) {
-				close(fd);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			/* MAP_PRIVATE we don't care about changing the
-			 * underlying file just yet. */
-			buf = mmap(NULL, fbuf.st_size + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
-			if (buf == MAP_FAILED) {
-				close(fd);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
 
 			// extract id of current layer
-			id = extract_field("\"id\":", buf);
+			id = extract_field("\"id\":", m.buf);
 			if (!id && errno == ENOMEM) {
-				munmap(buf, fbuf.st_size + 1);
-				ftruncate(fd, fbuf.st_size);
-				close(fd);
+				munmap_file_as_str(&m);
 				closedir(layerdir);
 				goto cleanup_on_error;
 			}
 
 			// extract parent of current layer
-			parent = extract_field("\"parent\":", buf);
+			parent = extract_field("\"parent\":", m.buf);
 			if (!parent && errno == ENOMEM) {
-				munmap(buf, fbuf.st_size + 1);
-				ftruncate(fd, fbuf.st_size);
-				close(fd);
+				munmap_file_as_str(&m);
 				closedir(layerdir);
 				goto cleanup_on_error;
 			}
@@ -387,9 +358,7 @@ static int open_layer_dir(const char *path)
 			// new list element
 			new_layer = malloc(sizeof(*new_layer));
 			if (!new_layer) {
-				munmap(buf, fbuf.st_size + 1);
-				ftruncate(fd, fbuf.st_size);
-				close(fd);
+				munmap_file_as_str(&m);
 				closedir(layerdir);
 				goto cleanup_on_error;
 			}
@@ -397,9 +366,7 @@ static int open_layer_dir(const char *path)
 			// path to layer.tar file
 			tar_path = append_paths(newpath, "layer.tar");
 			if (!tar_path) {
-				munmap(buf, fbuf.st_size + 1);
-				ftruncate(fd, fbuf.st_size);
-				close(fd);
+				munmap_file_as_str(&m);
 				closedir(layerdir);
 				goto cleanup_on_error;
 			}
@@ -407,9 +374,7 @@ static int open_layer_dir(const char *path)
 			// new list node
 			new_lnode = malloc(sizeof(*new_lnode));
 			if (!new_lnode) {
-				munmap(buf, fbuf.st_size + 1);
-				ftruncate(fd, fbuf.st_size);
-				close(fd);
+				munmap_file_as_str(&m);
 				closedir(layerdir);
 				goto cleanup_on_error;
 			}
@@ -422,9 +387,7 @@ static int open_layer_dir(const char *path)
 			list_add_tail(&layer_list, new_lnode);
 
 			free(json);
-			munmap(buf, fbuf.st_size + 1);
-			ftruncate(fd, fbuf.st_size);
-			close(fd);
+			munmap_file_as_str(&m);
 		}
 		closedir(layerdir);
 	}
