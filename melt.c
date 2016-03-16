@@ -60,10 +60,9 @@ static void usage(const char *name);
 
 int main(int argc, char *argv[])
 {
-	int c, ret;
+	int c, ret, fret = -1;
 	size_t len;
-	char *path;
-	char *image = NULL, *image_out = NULL;
+	char *image = NULL, *image_out = NULL, *path = NULL;
 	bool del_whiteout = false;
 	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 	char new_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
@@ -98,51 +97,41 @@ int main(int argc, char *argv[])
 	if (!mkdtemp(old_img_tmp)) {
 		exit(EXIT_FAILURE);
 	}
-	if (chmod(old_img_tmp, 0755) < 0) {
-		recursive_rmdir(old_img_tmp);
-		exit(EXIT_FAILURE);
-	}
+	if (chmod(old_img_tmp, 0755) < 0)
+		goto out;
 
 	len = strlen(old_img_tmp) + strlen(image) + 1 /* / */;
 	path = malloc(len + 1);
-	if (!path) {
-		recursive_rmdir(old_img_tmp);
-		exit(EXIT_FAILURE);
-	}
+	if (!path)
+		goto out;
 
 	ret = snprintf(path, len + 1, "%s/%s", old_img_tmp, image);
-	if (ret < 0 || (size_t)ret >= len + 1) {
-		recursive_rmdir(old_img_tmp);
-		free(path);
-		exit(EXIT_FAILURE);
-	}
+	if (ret < 0 || (size_t)ret >= len + 1)
+		goto out;
 
 	if (file_untar(image, old_img_tmp) < 0) {
 		fprintf(stderr, "Failed to untar original image.\n");
-		recursive_rmdir(old_img_tmp);
-		free(path);
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	if (open_layer_dir(old_img_tmp) < 0) {
 		fprintf(stderr, "Failed to inspect layers.\n");
-		recursive_rmdir(old_img_tmp);
-		free(path);
-		exit(EXIT_FAILURE);
+		goto out;
 	}
 
 	if (merge_layers(image_out, old_img_tmp, new_img_tmp, del_whiteout) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
-		free_layer_list();
-		recursive_rmdir(old_img_tmp);
-		free(path);
-		exit(EXIT_FAILURE);
+		goto out;
 	}
+	fret = 0;
 
+out:
 	free_layer_list();
 	recursive_rmdir(old_img_tmp);
 	free(path);
-	exit(EXIT_SUCCESS);
+	if (!fret)
+		exit(EXIT_SUCCESS);
+	exit(EXIT_FAILURE);
 }
 
 static char *extract_field(const char *field, const char *json)
