@@ -52,7 +52,8 @@ static char *extract_field(const char *field, const char *json);
 static void free_layer_list(void);
 static bool is_json(const char *file);
 static struct layer *find_child(const char *id);
-static int merge_layers(const char *image_out, const char *old_img_tmp, char *new_img_tmp);
+static int merge_layers(const char *image_out, const char *old_img_tmp,
+			char *new_img_tmp, bool del_whiteout);
 static int open_layer_dir(const char *path);
 static void usage(const char *name);
 
@@ -63,11 +64,15 @@ int main(int argc, char *argv[])
 	size_t len;
 	char *path;
 	char *image = NULL, *image_out = NULL;
+	bool del_whiteout = false;
 	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 	char new_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 
-	while ((c = getopt(argc, argv, "t:i:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "wt:i:o:")) != EOF) {
 		switch (c) {
+		case 'w':
+			del_whiteout = true;
+			break;
 		case 't':
 			ret = snprintf(old_img_tmp, PATH_MAX, "%s/unify_XXXXXX", optarg);
 			if (ret < 0 || ret >= PATH_MAX)
@@ -126,7 +131,7 @@ int main(int argc, char *argv[])
 		exit(EXIT_FAILURE);
 	}
 
-	if (merge_layers(image_out, old_img_tmp, new_img_tmp) < 0) {
+	if (merge_layers(image_out, old_img_tmp, new_img_tmp, del_whiteout) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
 		free_layer_list();
 		recursive_rmdir(old_img_tmp);
@@ -221,7 +226,8 @@ static bool is_json(const char *file)
 	return false;
 }
 
-static int merge_layers(const char *image_out, const char *old_img_tmp, char *new_img_tmp)
+static int merge_layers(const char *image_out, const char *old_img_tmp,
+			char *new_img_tmp, bool del_whiteout)
 {
 	int ret = -1;
 	size_t i;
@@ -263,6 +269,16 @@ static int merge_layers(const char *image_out, const char *old_img_tmp, char *ne
 			goto out_remove_tmp;
 
 		cur = child;
+	}
+
+	if (del_whiteout) {
+		char cwd[PATH_MAX];
+		if (!getcwd(cwd, PATH_MAX))
+			goto out_remove_tmp;
+		if (delete_whiteouts(new_img_tmp) < 0)
+			goto out_remove_tmp;
+		if (chdir(cwd) < 0)
+			goto out_remove_tmp;
 	}
 
 	/* tar into one single layer and overwrite current topmost layer of the

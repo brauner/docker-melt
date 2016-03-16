@@ -91,6 +91,15 @@ int file_untar(const char *from, const char *to)
 	return 0;
 }
 
+char *is_whiteout(char *file)
+{
+	if (!strncmp(file, ".wh.", 4) && strcmp(file, ".wh.")) {
+		return file + 4;
+	}
+
+	return NULL;
+}
+
 int mmap_file_as_str(const char *file, struct mapped_file *m)
 {
 	char *buf = NULL;
@@ -208,4 +217,56 @@ again:
 		return -1;
 
 	return 0;
+}
+
+int delete_whiteouts(const char *path)
+{
+	bool err = false;
+	char *removed;
+	int ret;
+	struct dirent dirent, *direntp;
+	DIR *dir;
+	struct stat fbuf;
+
+	dir = opendir(path);
+	if (!dir)
+		return -1;
+
+	if (chdir(path) < 0)
+		return -1;
+
+	while (!readdir_r(dir, &dirent, &direntp)) {
+		if (!direntp)
+			break;
+
+		if (!strcmp(direntp->d_name, ".") ||
+		    !strcmp(direntp->d_name, ".."))
+			continue;
+
+		ret = lstat(direntp->d_name, &fbuf);
+		if (ret) {
+			err = true;
+			continue;
+		}
+
+		if (S_ISDIR(fbuf.st_mode)) {
+			if (delete_whiteouts(direntp->d_name) < 0)
+				err = true;
+		} else {
+			removed = is_whiteout(direntp->d_name);
+			if (removed) {
+				if (unlink(removed) < 0)
+					err = true;
+				if (unlink(direntp->d_name) < 0)
+					err = true;
+			}
+		}
+	}
+
+	if (chdir("..") < 0)
+		err = true;
+
+	closedir(dir);
+
+	return err ? -1 : 0;
 }
