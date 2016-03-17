@@ -39,7 +39,7 @@ char *append_paths(const char *pre, const char *post)
 	char *prepost = NULL;
 
 	if (post[0] != '/') {
-		len += 1;
+		len++;
 		fmt = "%s/%s";
 	}
 
