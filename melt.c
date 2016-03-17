@@ -30,42 +30,27 @@
 #include <fcntl.h>
 #include <unistd.h>
 
-#include "list.h"
 #include "utils.h"
 
-struct list layer_list;
-
-__attribute__((constructor))
-void layer_list_constructor(void)
-{
-	list_init(&layer_list);
-}
-
-struct layer {
-	char *id;
-	char *parent;
-	char *path;
-	char *tar_path;
-};
-
-static char *extract_field(const char *field, const char *json);
-static void free_layer_list(void);
-static bool is_json(const char *file);
-static struct layer *find_child(const char *id);
+static int extract_ordered_layers(struct mapped_file *manifest, char ***arr);
+static void free_ordered_layer_list(char **arr);
+static int mmap_manifest(const char *path, struct mapped_file *f);
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char *new_img_tmp, bool del_whiteout, bool compress);
-static int open_layer_dir(const char *path);
+			char **layers, char *new_img_tmp,
+			bool del_whiteout, bool compress);
 static void usage(const char *name);
 
 
 int main(int argc, char *argv[])
 {
+	char **ordered_layers = NULL;
 	int c, ret, fret = -1;
 	size_t len;
 	char *image = NULL, *image_out = NULL, *path = NULL;
 	bool del_whiteout = false, compress = false;
 	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 	char new_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
+	struct mapped_file f;
 
 	while ((c = getopt(argc, argv, "cwt:i:o:")) != EOF) {
 		switch (c) {
@@ -117,150 +102,117 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (open_layer_dir(old_img_tmp) < 0) {
-		fprintf(stderr, "Failed to inspect layers.\n");
+	ret = mmap_manifest(old_img_tmp, &f);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to inspect manifest.json.\n");
 		goto out;
 	}
 
-	if (merge_layers(image_out, old_img_tmp, new_img_tmp, del_whiteout, compress) < 0) {
+	if (extract_ordered_layers(&f, &ordered_layers) < 0) {
+		fprintf(stderr, "Failed to extract layers.\n");
+		goto out;
+	}
+
+	if (merge_layers(image_out, old_img_tmp, ordered_layers, new_img_tmp, del_whiteout, compress) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
 		goto out;
 	}
 	fret = 0;
 
 out:
-	free_layer_list();
 	recursive_rmdir(old_img_tmp);
 	free(path);
+	if (!ret)
+		munmap_file_as_str(&f);
+	free_ordered_layer_list(ordered_layers);
 	if (!fret)
 		exit(EXIT_SUCCESS);
 	exit(EXIT_FAILURE);
 }
 
-static char *extract_field(const char *field, const char *json)
+static int add_to_array(char ***arr)
 {
-	char *dup = NULL, *parent = NULL, *ret = NULL;
-	size_t field_len;
+	size_t len = 0;
+	if (*arr)
+		for (; (*arr)[len]; len++)
+			;
 
-	// field"1243sadf134fdsa13fd"
-	dup = malloc(strlen(json) + 1);
-	if (!dup)
-		goto out;
-	char *end = stpcpy(dup, json);
-
-	parent = strstr(dup, field);
-	if (!parent)
-		goto out;
-
-	field_len = strlen(field);
-	// paranoid: check if we would point beyond the end of dup
-	if ((parent + field_len + 1) > end)
-		goto out;
-
-	parent = parent + field_len + 1;
-	// 1243sadf134fdsa13fd"
-
-	// \"
-	char *tmp = strchr(parent, '\"');
+	char **tmp = realloc(*arr, (len + 2) * sizeof(char **));
 	if (!tmp)
-		goto out;
-	*tmp = '\0';
-
-	ret = strdup(parent);
-out:
-	free(dup);
-	return ret ;
+		return -1;
+	*arr = tmp;
+	(*arr)[len + 1] = NULL;
+	return len;
 }
 
-static void free_layer_list(void)
+static int extract_ordered_layers(struct mapped_file *manifest, char ***arr)
 {
-	struct list *it;
-	struct layer *lcast;
-	list_for_each_safe(it, &layer_list, (&layer_list)->next) {
-		lcast = it->elem;
-		free(lcast->id);
-		free(lcast->parent);
-		free(lcast->path);
-		free(lcast->tar_path);
-		free(lcast);
-		free(it);
+	ssize_t pos = 0;
+	char *layers = strstr(manifest->buf, "\"Layers\":[\"");
+	if (!layers)
+		return -1; // corrupt manifest.json file
+
+	char *list_start = layers + /* "Layers":[" */ + 10;
+	char *list_end = strchr(list_start, ']');
+	if (!list_end)
+		return -1;
+	*list_end = '\0';
+
+	char *a = list_start, *b = list_start;
+	char *layer = NULL;
+	while ((a = strchr(b, '"'))) {
+		a++;
+		b = strchr(a, '"');
+		if (!b)
+			return -1;
+		pos = add_to_array(arr);
+		if (pos < 0)
+			return -1;
+		size_t len = b - a;
+		(*arr)[pos] = malloc(len + 1);
+		if (!(*arr)[pos])
+			return -1;
+		strncpy((*arr)[pos], a, len);
+		(*arr)[pos][len] = '\0'; // strncpy() does not necessarily \0-terminate
+		free(layer);
+		b++;
 	}
-	/* Do not call free(it) here: The first node of layer_list is a non-heap
-	 * object located in the data segment. */
+
+	return 0;
 }
 
-static struct layer *find_child(const char *id)
+static void free_ordered_layer_list(char **arr)
 {
-	struct list *it;
-	struct layer *lcast;
+	if (!arr)
+		return;
 
-	list_for_each(it, &layer_list) {
-		lcast = it->elem;
-		// If no id was given we want to find the root ancestor.
-		if (!id) {
-			if (!lcast->parent)
-				return lcast;
-		} else {
-			if (lcast->parent && !strcmp(lcast->parent, id))
-				return lcast;
-		}
+	char **it;
+	for (it = arr; it && *it; it++) {
+		free(*it);
 	}
-	/* Should not happen. (If it does it probably means we found a corrupt
-	 * json file.) */
-	return NULL;
-}
-
-static bool is_json(const char *file)
-{
-	if (!strcmp(file, "json"))
-		return true;
-
-	return false;
+	free(arr);
 }
 
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char *new_img_tmp, bool del_whiteout, bool compress)
+			char **layers, char *new_img_tmp,
+			bool del_whiteout, bool compress)
 {
-	int ret = -1;
-	size_t i;
-	size_t len = list_len(&layer_list);
-	struct layer *child, *cur;
-
-	cur = find_child(NULL);
-	if (!cur) {
-		fprintf(stderr, "Failed to find root ancestor of all layers.\n");
-		return -1;
-	}
+	int r, ret = -1;
+	char *path = NULL;
 
 	if (!mkdtemp(new_img_tmp))
 		return -1;
 	if (chmod(new_img_tmp, 0755) < 0)
 		goto out_remove_tmp;
 
-	// root ancestor
-	if (file_untar(cur->tar_path, new_img_tmp) < 0)
-		goto out_remove_tmp;
-
-	if (recursive_rmdir(cur->path) < 0)
-		goto out_remove_tmp;
-
-	/* Return hierarchy of layers starting from the root ancestor.
-	 * (len - 1, because we need to account for the fact that we already
-	 * extracted the parent.) */
-	for (i = 0; i < len - 1; i++) {
-		child = find_child(cur->id);
-		if (!child) {
-			fprintf(stderr, "Invalid json file.\n");
+	for (; layers && *layers; layers++) {
+		path = append_paths(old_img_tmp, *layers);
+		if (!path)
 			goto out_remove_tmp;
-		}
-
-		if (file_untar(child->tar_path, new_img_tmp) < 0)
+		r = file_untar(path, new_img_tmp);
+		free(path);
+		if (r < 0)
 			goto out_remove_tmp;
-
-		if (recursive_rmdir(child->path) < 0)
-			goto out_remove_tmp;
-
-		cur = child;
 	}
 
 	if (del_whiteout) {
@@ -273,8 +225,6 @@ static int merge_layers(const char *image_out, const char *old_img_tmp,
 			goto out_remove_tmp;
 	}
 
-	/* tar into one single layer and overwrite current topmost layer of the
-	 * youngest child. */
 	if (file_tar(new_img_tmp, image_out, compress) < 0)
 		goto out_remove_tmp;
 
@@ -285,33 +235,26 @@ out_remove_tmp:
 	return ret;
 }
 
-static int open_layer_dir(const char *path)
+static int mmap_manifest(const char *path, struct mapped_file *f)
 {
-	char *tar_path = NULL, *parent = NULL, *id = NULL, *json = NULL,
-	     *newpath = NULL;
-	struct list *new_lnode;
-	struct layer *new_layer;
+	int ret = -1;
+	char *newpath = NULL;
 	struct dirent dirent, *direntp;
-	struct dirent layerdirent, *layerdirentp;
-	struct mapped_file m;
 	DIR *dir;
-
 	// open global directory
 	dir = opendir(path);
 	if (!dir)
 		return -1;
 
 	while (!readdir_r(dir, &dirent, &direntp)) {
-		DIR *layerdir;
-
 		if (!direntp)
 			break;
 
 		if (!strcmp(direntp->d_name, ".") ||
-				!strcmp(direntp->d_name, ".."))
+		    !strcmp(direntp->d_name, ".."))
 			continue;
 
-		if (direntp->d_type != DT_DIR)
+		if (strcmp(direntp->d_name, "manifest.json"))
 			continue;
 
 		// create path to layer directory
@@ -319,98 +262,13 @@ static int open_layer_dir(const char *path)
 		if (!newpath)
 			return -1;
 
-		// descend into layer
-		layerdir = opendir(newpath);
-		if (!layerdir) {
-			free(newpath);
-			return -1;
-		}
-
-		while (!readdir_r(layerdir, &layerdirent, &layerdirentp)) {
-			if (!layerdirentp)
-				break;
-
-			if (!strcmp(layerdirentp->d_name, ".") ||
-					!strcmp(layerdirentp->d_name, ".."))
-				continue;
-
-			if (!is_json(layerdirentp->d_name))
-				continue;
-
-			// create path to json file
-			json = append_paths(newpath, layerdirentp->d_name);
-			if (!json) {
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			if (mmap_file_as_str(json, &m) < 0)
-				goto cleanup_on_error;
-
-			// extract id of current layer
-			id = extract_field("\"id\":", m.buf);
-			if (!id && errno == ENOMEM) {
-				munmap_file_as_str(&m);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			// extract parent of current layer
-			parent = extract_field("\"parent\":", m.buf);
-			if (!parent && errno == ENOMEM) {
-				munmap_file_as_str(&m);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			// new list element
-			new_layer = malloc(sizeof(*new_layer));
-			if (!new_layer) {
-				munmap_file_as_str(&m);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			// path to layer.tar file
-			tar_path = append_paths(newpath, "layer.tar");
-			if (!tar_path) {
-				munmap_file_as_str(&m);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			// new list node
-			new_lnode = malloc(sizeof(*new_lnode));
-			if (!new_lnode) {
-				munmap_file_as_str(&m);
-				closedir(layerdir);
-				goto cleanup_on_error;
-			}
-
-			new_layer->id = id;
-			new_layer->path = newpath;
-			new_layer->parent = parent;
-			new_layer->tar_path = tar_path;
-			list_add_elem(new_lnode, new_layer);
-			list_add_tail(&layer_list, new_lnode);
-
-			free(json);
-			munmap_file_as_str(&m);
-		}
-		closedir(layerdir);
+		ret = mmap_file_as_str(newpath, f);
+		break;
 	}
-	closedir(dir);
 
-	return 0;
-
-cleanup_on_error:
-	free(id);
-	free(json);
 	free(newpath);
-	free(parent);
-	free(tar_path);
 	closedir(dir);
-	return -1;
+	return ret;
 }
 
 static void usage(const char *name)
