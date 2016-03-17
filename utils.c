@@ -245,7 +245,7 @@ int delete_whiteouts(const char *path)
 			continue;
 
 		ret = lstat(direntp->d_name, &fbuf);
-		if (ret) {
+		if (ret < 0 && !(errno == ENOENT)) {
 			err = true;
 			continue;
 		}
