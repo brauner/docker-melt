@@ -159,7 +159,6 @@ static int extract_ordered_layers(struct mapped_file *manifest, char ***arr)
 	*list_end = '\0';
 
 	char *a = list_start, *b = list_start;
-	char *layer = NULL;
 	while ((a = strchr(b, '"'))) {
 		a++;
 		b = strchr(a, '"');
@@ -174,7 +173,6 @@ static int extract_ordered_layers(struct mapped_file *manifest, char ***arr)
 			return -1;
 		strncpy((*arr)[pos], a, len);
 		(*arr)[pos][len] = '\0'; // strncpy() does not necessarily \0-terminate
-		free(layer);
 		b++;
 	}
 
