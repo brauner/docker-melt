@@ -45,8 +45,7 @@ int main(int argc, char *argv[])
 {
 	char **ordered_layers = NULL;
 	int c, ret, fret = -1;
-	size_t len;
-	char *image = NULL, *image_out = NULL, *path = NULL;
+	char *image = NULL, *image_out = NULL;
 	bool del_whiteout = false, compress = false;
 	char *tmp_prefix = "/tmp";
 	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
@@ -86,15 +85,6 @@ int main(int argc, char *argv[])
 	if (chmod(old_img_tmp, 0755) < 0)
 		goto out;
 
-	len = strlen(old_img_tmp) + strlen(image) + 1 /* / */;
-	path = malloc(len + 1);
-	if (!path)
-		goto out;
-
-	ret = snprintf(path, len + 1, "%s/%s", old_img_tmp, image);
-	if (ret < 0 || (size_t)ret >= len + 1)
-		goto out;
-
 	if (file_untar(image, old_img_tmp) < 0) {
 		fprintf(stderr, "Failed to untar original image.\n");
 		goto out;
@@ -119,7 +109,6 @@ int main(int argc, char *argv[])
 
 out:
 	recursive_rmdir(old_img_tmp);
-	free(path);
 	if (!ret)
 		munmap_file_as_str(&f);
 	free_ordered_layer_list(ordered_layers);
