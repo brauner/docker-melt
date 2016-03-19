@@ -36,8 +36,8 @@ static int extract_ordered_layers(struct mapped_file *manifest, char ***arr);
 static void free_ordered_layer_list(char **arr);
 static int mmap_manifest(const char *path, struct mapped_file *f);
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char **layers, char *new_img_tmp,
-			bool del_whiteout, bool compress);
+			char **layers, char *tmp_prefix, bool del_whiteout,
+			bool compress);
 static void usage(const char *name);
 
 
@@ -48,8 +48,8 @@ int main(int argc, char *argv[])
 	size_t len;
 	char *image = NULL, *image_out = NULL, *path = NULL;
 	bool del_whiteout = false, compress = false;
+	char *tmp_prefix = "/tmp";
 	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
-	char new_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
 	struct mapped_file f;
 
 	while ((c = getopt(argc, argv, "cwt:i:o:")) != EOF) {
@@ -61,10 +61,8 @@ int main(int argc, char *argv[])
 			del_whiteout = true;
 			break;
 		case 't':
-			ret = snprintf(old_img_tmp, PATH_MAX, "%s/unify_XXXXXX", optarg);
-			if (ret < 0 || ret >= PATH_MAX)
-				exit(EXIT_FAILURE);
-			ret = snprintf(new_img_tmp, PATH_MAX, "%s/unify_XXXXXX", optarg);
+			tmp_prefix = optarg;
+			ret = snprintf(old_img_tmp, PATH_MAX, "%s/unify_XXXXXX", tmp_prefix);
 			if (ret < 0 || ret >= PATH_MAX)
 				exit(EXIT_FAILURE);
 			break;
@@ -113,7 +111,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (merge_layers(image_out, old_img_tmp, ordered_layers, new_img_tmp, del_whiteout, compress) < 0) {
+	if (merge_layers(image_out, old_img_tmp, ordered_layers, tmp_prefix, del_whiteout, compress) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
 		goto out;
 	}
@@ -192,22 +190,27 @@ static void free_ordered_layer_list(char **arr)
 }
 
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char **layers, char *new_img_tmp,
-			bool del_whiteout, bool compress)
+			char **layers, char *tmp_prefix, bool del_whiteout,
+			bool compress)
 {
 	int r, ret = -1;
 	char *path = NULL;
+	char img_tmp1[PATH_MAX] = "/tmp/unify_XXXXXX";
 
-	if (!mkdtemp(new_img_tmp))
+	ret = snprintf(img_tmp1, PATH_MAX, "%s/unify_XXXXXX", tmp_prefix);
+	if (ret < 0 || ret >= PATH_MAX)
+		exit(EXIT_FAILURE);
+
+	if (!mkdtemp(img_tmp1))
 		return -1;
-	if (chmod(new_img_tmp, 0755) < 0)
+	if (chmod(img_tmp1, 0755) < 0)
 		goto out_remove_tmp;
 
 	for (; layers && *layers; layers++) {
 		path = append_paths(old_img_tmp, *layers);
 		if (!path)
 			goto out_remove_tmp;
-		r = file_untar(path, new_img_tmp);
+		r = file_untar(path, img_tmp1);
 		free(path);
 		if (r < 0)
 			goto out_remove_tmp;
@@ -217,19 +220,19 @@ static int merge_layers(const char *image_out, const char *old_img_tmp,
 		char cwd[PATH_MAX];
 		if (!getcwd(cwd, PATH_MAX))
 			goto out_remove_tmp;
-		if (delete_whiteouts(new_img_tmp) < 0)
+		if (delete_whiteouts(img_tmp1) < 0)
 			goto out_remove_tmp;
 		if (chdir(cwd) < 0)
 			goto out_remove_tmp;
 	}
 
-	if (file_tar(new_img_tmp, image_out, compress) < 0)
+	if (file_tar(img_tmp1, image_out, compress) < 0)
 		goto out_remove_tmp;
 
 	ret = 0;
 
 out_remove_tmp:
-	recursive_rmdir(new_img_tmp);
+	recursive_rmdir(img_tmp1);
 	return ret;
 }
 
