@@ -36,8 +36,7 @@ static int extract_ordered_layers(struct mapped_file *manifest, char ***arr);
 static void free_ordered_layer_list(char **arr);
 static int mmap_manifest(const char *path, struct mapped_file *f);
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char **layers, char *tmp_prefix, bool del_whiteout,
-			bool compress);
+			char **layers, char *tmp_prefix, bool compress);
 static void usage(const char *name);
 
 
@@ -46,9 +45,9 @@ int main(int argc, char *argv[])
 	char **ordered_layers = NULL;
 	int c, ret, fret = -1;
 	char *image = NULL, *image_out = NULL;
-	bool del_whiteout = false, compress = false;
+	bool compress = false;
 	char *tmp_prefix = "/tmp";
-	char old_img_tmp[PATH_MAX] = "/tmp/unify_XXXXXX";
+	char old_img_tmp[PATH_MAX] = "/tmp/melt_XXXXXX";
 	struct mapped_file f;
 
 	while ((c = getopt(argc, argv, "cwt:i:o:")) != EOF) {
@@ -56,12 +55,9 @@ int main(int argc, char *argv[])
 		case 'c':
 			compress = true;
 			break;
-		case 'w':
-			del_whiteout = true;
-			break;
 		case 't':
 			tmp_prefix = optarg;
-			ret = snprintf(old_img_tmp, PATH_MAX, "%s/unify_XXXXXX", tmp_prefix);
+			ret = snprintf(old_img_tmp, PATH_MAX, "%s/melt_XXXXXX", tmp_prefix);
 			if (ret < 0 || ret >= PATH_MAX)
 				exit(EXIT_FAILURE);
 			break;
@@ -101,14 +97,14 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (merge_layers(image_out, old_img_tmp, ordered_layers, tmp_prefix, del_whiteout, compress) < 0) {
+	if (merge_layers(image_out, old_img_tmp, ordered_layers, tmp_prefix, compress) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
 		goto out;
 	}
 	fret = 0;
 
 out:
-	recursive_rmdir(old_img_tmp);
+	recursive_rmdir(old_img_tmp, false);
 	if (!ret)
 		munmap_file_as_str(&f);
 	free_ordered_layer_list(ordered_layers);
@@ -179,50 +175,66 @@ static void free_ordered_layer_list(char **arr)
 }
 
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char **layers, char *tmp_prefix, bool del_whiteout,
-			bool compress)
+			char **layers, char *tmp_prefix, bool compress)
 {
-	int r, ret = -1;
+	int fret = -1, ret;
 	char *path = NULL;
-	char img_tmp1[PATH_MAX] = "/tmp/unify_XXXXXX";
+	char img_tmp1[PATH_MAX];
+	char img_tmp2[PATH_MAX];
 
-	ret = snprintf(img_tmp1, PATH_MAX, "%s/unify_XXXXXX", tmp_prefix);
+	ret = snprintf(img_tmp1, PATH_MAX, "%s/melt_XXXXXX", tmp_prefix);
 	if (ret < 0 || ret >= PATH_MAX)
-		exit(EXIT_FAILURE);
+		return -1;
+
+	ret = snprintf(img_tmp2, PATH_MAX, "%s/melt_XXXXXX", tmp_prefix);
+	if (ret < 0 || ret >= PATH_MAX)
+		return -1;
 
 	if (!mkdtemp(img_tmp1))
 		return -1;
 	if (chmod(img_tmp1, 0755) < 0)
-		goto out_remove_tmp;
+		goto out_remove_tmp_1;
+
+	if (!mkdtemp(img_tmp2))
+		goto out_remove_tmp_1;
+	if (chmod(img_tmp2, 0755) < 0)
+		goto out_remove_tmp_2;
 
 	for (; layers && *layers; layers++) {
 		path = append_paths(old_img_tmp, *layers);
 		if (!path)
-			goto out_remove_tmp;
-		r = file_untar(path, img_tmp1);
+			goto out_remove_tmp_2;
+		if (file_untar(path, img_tmp2) < 0) {
+			free(path);
+			goto out_remove_tmp_2;
+		}
+		/* save space by immediately deleting layers we've already
+		 * untared. */
+		if (unlink(path) < 0) {
+			free(path);
+			goto out_remove_tmp_2;
+		}
 		free(path);
-		if (r < 0)
-			goto out_remove_tmp;
-	}
-
-	if (del_whiteout) {
-		char cwd[PATH_MAX];
-		if (!getcwd(cwd, PATH_MAX))
-			goto out_remove_tmp;
-		if (delete_whiteouts(img_tmp1) < 0)
-			goto out_remove_tmp;
-		if (chdir(cwd) < 0)
-			goto out_remove_tmp;
+		// rsync and only leave whiteout files behind
+		if (rsync_layer(img_tmp2, img_tmp1) < 0)
+			goto out_remove_tmp_2;
+		if (delete_whiteouts(img_tmp2, img_tmp1) < 0)
+			goto out_remove_tmp_2;
+		// empty contents of tmp dir but leave itself intact
+		if (recursive_rmdir(img_tmp2, true) < 0)
+			goto out_remove_tmp_2;
 	}
 
 	if (file_tar(img_tmp1, image_out, compress) < 0)
-		goto out_remove_tmp;
+		goto out_remove_tmp_2;
 
-	ret = 0;
+	fret = 0;
 
-out_remove_tmp:
-	recursive_rmdir(img_tmp1);
-	return ret;
+out_remove_tmp_2:
+	recursive_rmdir(img_tmp2, false);
+out_remove_tmp_1:
+	recursive_rmdir(img_tmp1, false);
+	return fret;
 }
 
 static int mmap_manifest(const char *path, struct mapped_file *f)
@@ -271,8 +283,6 @@ static void usage(const char *name)
 	printf("	Specify where to store the new image.\n");
 	printf("-t <temporary-folder>\n");
 	printf("	Specify a location where temporary files produced by this executable are stored.\n");
-	printf("-w\n");
-	printf("	Delete whiteouts in final rootfs.\n");
 	printf("-c\n");
 	printf("	Compress tar file through xz.\n");
 	printf("\n");

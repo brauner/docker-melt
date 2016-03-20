@@ -147,7 +147,7 @@ int munmap_file_as_str(struct mapped_file *m)
 	return 0;
 }
 
-int recursive_rmdir(char *dirname)
+int recursive_rmdir(const char *dirname, bool skip_top)
 {
 	struct stat s;
 	struct dirent dirent, *direntp;
@@ -183,7 +183,7 @@ int recursive_rmdir(char *dirname)
 		}
 
 		if (S_ISDIR(s.st_mode)) {
-			if (recursive_rmdir(delete) < 0)
+			if (recursive_rmdir(delete, skip_top) < 0)
 				err = true;
 		} else {
 			if (unlink(delete) < 0)
@@ -191,8 +191,9 @@ int recursive_rmdir(char *dirname)
 		}
 	}
 
-	if (rmdir(dirname) < 0)
-		err = true;
+	if (!skip_top)
+		if (rmdir(dirname) < 0)
+			err = true;
 
 	closedir(dir);
 
@@ -220,23 +221,24 @@ again:
 	return 0;
 }
 
-int delete_whiteouts(const char *path)
+int delete_whiteouts(const char *oldpath, const char *newpath)
 {
-	bool err = false;
-	char *removed;
-	int ret;
+	struct stat s;
 	struct dirent dirent, *direntp;
 	DIR *dir;
-	struct stat fbuf;
+	int ret;
+	bool err = false;
+	char recurse[PATH_MAX];
+	char delete[PATH_MAX];
+	char *whiteout;
 
-	dir = opendir(path);
+	dir = opendir(oldpath);
 	if (!dir)
 		return -1;
 
-	if (chdir(path) < 0)
-		return -1;
-
 	while (!readdir_r(dir, &dirent, &direntp)) {
+		int rc;
+
 		if (!direntp)
 			break;
 
@@ -244,30 +246,67 @@ int delete_whiteouts(const char *path)
 		    !strcmp(direntp->d_name, ".."))
 			continue;
 
-		ret = lstat(direntp->d_name, &fbuf);
-		if (ret < 0 && !(errno == ENOENT)) {
+		whiteout = is_whiteout(direntp->d_name);
+		rc = snprintf(delete, PATH_MAX, "%s/%s", newpath, whiteout ? whiteout : direntp->d_name);
+		if (rc < 0 || rc >= PATH_MAX) {
 			err = true;
 			continue;
 		}
-
-		if (S_ISDIR(fbuf.st_mode)) {
-			if (delete_whiteouts(direntp->d_name) < 0)
+		if (whiteout) {
+			ret = lstat(delete, &s);
+			if (ret) {
 				err = true;
-		} else {
-			removed = is_whiteout(direntp->d_name);
-			if (removed) {
-				if (unlink(removed) < 0)
+				continue;
+			}
+			if (S_ISDIR(s.st_mode)) {
+				if (recursive_rmdir(delete, false) < 0)
 					err = true;
-				if (unlink(direntp->d_name) < 0)
+			} else {
+				if (unlink(delete) < 0)
 					err = true;
 			}
 		}
-	}
 
-	if (chdir("..") < 0)
-		err = true;
+		rc = snprintf(recurse, PATH_MAX, "%s/%s", oldpath, direntp->d_name);
+		if (rc < 0 || rc >= PATH_MAX) {
+			err = true;
+			continue;
+		}
+		ret = lstat(recurse, &s);
+		if (ret) {
+			err = true;
+			continue;
+		}
+		if (S_ISDIR(s.st_mode))
+			if (delete_whiteouts(recurse, delete) < 0)
+				err = true;
+	}
 
 	closedir(dir);
 
 	return err ? -1 : 0;
+}
+
+int rsync_layer(const char *from, const char *to)
+{
+	pid_t pid = fork();
+	if (pid < 0)
+		return -1;
+
+	if (!pid) {
+		char img_tmp3[PATH_MAX];
+		int ret = snprintf(img_tmp3, PATH_MAX, "%s/./", from);
+		if (ret < 0 || ret >= PATH_MAX)
+			return -1;
+
+		execlp("rsync", "rsync", "-axhsrpR", "--numeric-ids",
+		       "--remove-source-files", "--exclude=.wh.*", img_tmp3, to,
+		       (char *)NULL);
+		return -1; // should not happen
+	}
+
+	if (wait_for_pid(pid) < 0)
+		return -1;
+
+	return 0;
 }
