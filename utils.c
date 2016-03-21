@@ -294,13 +294,13 @@ int rsync_layer(const char *from, const char *to)
 		return -1;
 
 	if (!pid) {
-		char img_tmp3[PATH_MAX];
-		int ret = snprintf(img_tmp3, PATH_MAX, "%s/./", from);
+		char tmp[PATH_MAX];
+		int ret = snprintf(tmp, PATH_MAX, "%s/./", from);
 		if (ret < 0 || ret >= PATH_MAX)
 			return -1;
 
 		execlp("rsync", "rsync", "-aXhsrpR", "--numeric-ids",
-		       "--remove-source-files", "--exclude=.wh.*", img_tmp3, to,
+		       "--remove-source-files", "--exclude=.wh.*", tmp, to,
 		       (char *)NULL);
 		return -1; // should not happen
 	}
