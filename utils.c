@@ -34,9 +34,9 @@
 
 char *append_paths(const char *pre, const char *post)
 {
-	size_t len = strlen(pre) + strlen(post) + 1;
 	const char *fmt = "%s%s";
 	char *prepost = NULL;
+	size_t len = strlen(pre) + strlen(post) + 1;
 
 	if (post[0] != '/') {
 		len++;
@@ -107,7 +107,8 @@ int mmap_file_as_str(const char *file, struct mapped_file *m)
 	struct stat fbuf;
 
 	// open file
-	if ((m->fd = open(file, O_RDWR | O_CLOEXEC)) < 0)
+	m->fd = open(file, O_RDWR | O_CLOEXEC);
+	if (m->fd < 0)
 		return -1;
 
 	if (fstat(m->fd, &fbuf) < 0)
@@ -116,20 +117,19 @@ int mmap_file_as_str(const char *file, struct mapped_file *m)
 	if (!fbuf.st_size)
 		goto out;
 
-	/* write terminating \0-byte to file.
-	 * (mmap()ed memory is only null terminated when the
-	 * filesize is not a multiple of the pagesize.) */
+	/* write terminating \0-byte to file. (mmap()ed memory is only null
+	 * terminated when the filesize is not a multiple of the pagesize.) */
 	if (pwrite(m->fd, "", 1, fbuf.st_size) <= 0)
 		goto out;
 
-	/* MAP_PRIVATE we don't care about changing the
-	 * underlying file just yet. */
+	// MAP_PRIVATE we don't care about changing the underlying file.
 	buf = mmap(NULL, fbuf.st_size + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE, m->fd, 0);
 	if (buf == MAP_FAILED) {
 		ftruncate(m->fd, fbuf.st_size);
 		goto out;
 	}
 	m->buf = buf;
+	// account for \0
 	m->len = fbuf.st_size + 1;
 	return 0;
 
@@ -140,8 +140,10 @@ out:
 
 int munmap_file_as_str(struct mapped_file *m)
 {
-	munmap(m->buf, m->len + 1);
-	ftruncate(m->fd, m->len);
+	// include added \0
+	munmap(m->buf, m->len);
+	// truncate to original file size by excluding \0
+	ftruncate(m->fd, m->len - 1);
 	close(m->fd);
 
 	return 0;
