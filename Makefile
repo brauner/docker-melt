@@ -1,6 +1,8 @@
 CC=gcc
 CFLAGS=-Wall -std=c99
 
+new: clean all
+
 all: utils.o melt.o
 	$(CC) $(CFLAGS) utils.o melt.o -o melt
 
