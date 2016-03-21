@@ -58,10 +58,11 @@ int file_tar(const char *from, const char *to, bool compress)
 		return -1;
 
 	if (!pid) {
-		execlp("tar", "tar", "--acls", "--xattrs", "--same-owner",
-		       "--numeric-owner", "--preserve-permissions",
-		       "--atime-preserve=system", "-S", "-C", from,
-		       compress ? "-cJf" : "-cf", to, ".", (char *)NULL);
+		execlp("tar", "tar", "--acls", "--xattrs", "--xattrs-include=*",
+		       "--same-owner", "--numeric-owner",
+		       "--preserve-permissions", "--atime-preserve=system",
+		       "-S", "-C", from, compress ? "-cJf" : "-cf", to, ".",
+		       (char *)NULL);
 		return -1; // should not happen
 	}
 
@@ -78,11 +79,10 @@ int file_untar(const char *from, const char *to)
 		return -1;
 
 	if (!pid) {
-		execlp("tar", "tar", "--overwrite", "--acls", "--xattrs",
-		       "--xattrs-include='*'", "--same-owner",
-		       "--numeric-owner", "--preserve-permissions",
-		       "--atime-preserve=system", "-S", "-xf", from, "-C", to,
-		       (char *)NULL);
+		execlp("tar", "tar", "--acls", "--xattrs", "--xattrs-include=*",
+		       "--same-owner", "--numeric-owner",
+		       "--preserve-permissions", "--atime-preserve=system",
+		       "-S", "-xf", from, "-C", to, (char *)NULL);
 		return -1; // should not happen
 	}
 
@@ -299,7 +299,7 @@ int rsync_layer(const char *from, const char *to)
 		if (ret < 0 || ret >= PATH_MAX)
 			return -1;
 
-		execlp("rsync", "rsync", "-axhsrpR", "--numeric-ids",
+		execlp("rsync", "rsync", "-aXhsrpR", "--numeric-ids",
 		       "--remove-source-files", "--exclude=.wh.*", img_tmp3, to,
 		       (char *)NULL);
 		return -1; // should not happen
