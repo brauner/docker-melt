@@ -254,10 +254,8 @@ int delete_whiteouts(const char *oldpath, const char *newpath)
 		}
 		if (whiteout) {
 			ret = lstat(delete, &s);
-			if (ret) {
-				err = true;
+			if (ret)
 				continue;
-			}
 			if (S_ISDIR(s.st_mode)) {
 				if (recursive_rmdir(delete, false) < 0)
 					err = true;
