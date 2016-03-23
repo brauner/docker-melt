@@ -177,63 +177,64 @@ static void free_ordered_layer_list(char **arr)
 static int merge_layers(const char *image_out, const char *old_img_tmp,
 			char **layers, char *tmp_prefix, bool compress)
 {
-	int fret = -1, ret;
-	char *path = NULL;
-	char img_tmp1[PATH_MAX];
-	char img_tmp2[PATH_MAX];
+	int fret = -1;
+	char *path = NULL, *tmp1 = NULL, *tmp2 = NULL;
 
-	ret = snprintf(img_tmp1, PATH_MAX, "%s/melt_XXXXXX", tmp_prefix);
-	if (ret < 0 || ret >= PATH_MAX)
-		return -1;
+	tmp1 = append_paths(tmp_prefix, "melt_XXXXXX");
+	if (!tmp1)
+		goto out_free;
 
-	ret = snprintf(img_tmp2, PATH_MAX, "%s/melt_XXXXXX", tmp_prefix);
-	if (ret < 0 || ret >= PATH_MAX)
-		return -1;
+	tmp2 = append_paths(tmp_prefix, "melt_XXXXXX");
+	if (!tmp2)
+		goto out_free;
 
-	if (!mkdtemp(img_tmp1))
-		return -1;
-	if (chmod(img_tmp1, 0755) < 0)
-		goto out_remove_tmp_1;
+	if (!mkdtemp(tmp1))
+		goto out_free;
+	if (chmod(tmp1, 0755) < 0)
+		goto out_rm_tmp1;
 
-	if (!mkdtemp(img_tmp2))
-		goto out_remove_tmp_1;
-	if (chmod(img_tmp2, 0755) < 0)
-		goto out_remove_tmp_2;
+	if (!mkdtemp(tmp2))
+		goto out_rm_tmp1;
+	if (chmod(tmp2, 0755) < 0)
+		goto out_rm_tmp2;
 
 	for (; layers && *layers; layers++) {
 		path = append_paths(old_img_tmp, *layers);
 		if (!path)
-			goto out_remove_tmp_2;
-		if (file_untar(path, img_tmp2) < 0) {
+			goto out_rm_tmp2;
+		if (file_untar(path, tmp2) < 0) {
 			free(path);
-			goto out_remove_tmp_2;
+			goto out_rm_tmp2;
 		}
 		/* save space by immediately deleting layers we've already
 		 * untared. */
 		if (unlink(path) < 0) {
 			free(path);
-			goto out_remove_tmp_2;
+			goto out_rm_tmp2;
 		}
 		free(path);
 		// rsync and only leave whiteout files behind
-		if (rsync_layer(img_tmp2, img_tmp1) < 0)
-			goto out_remove_tmp_2;
-		if (delete_whiteouts(img_tmp2, img_tmp1) < 0)
-			goto out_remove_tmp_2;
+		if (rsync_layer(tmp2, tmp1) < 0)
+			goto out_rm_tmp2;
+		if (delete_whiteouts(tmp2, tmp1) < 0)
+			goto out_rm_tmp2;
 		// empty contents of tmp dir but leave itself intact
-		if (recursive_rmdir(img_tmp2, true) < 0)
-			goto out_remove_tmp_2;
+		if (recursive_rmdir(tmp2, true) < 0)
+			goto out_rm_tmp2;
 	}
 
-	if (file_tar(img_tmp1, image_out, compress) < 0)
-		goto out_remove_tmp_2;
+	if (file_tar(tmp1, image_out, compress) < 0)
+		goto out_rm_tmp2;
 
 	fret = 0;
 
-out_remove_tmp_2:
-	recursive_rmdir(img_tmp2, false);
-out_remove_tmp_1:
-	recursive_rmdir(img_tmp1, false);
+out_rm_tmp2:
+	recursive_rmdir(tmp2, false);
+out_rm_tmp1:
+	recursive_rmdir(tmp1, false);
+out_free:
+	free(tmp1);
+	free(tmp2);
 	return fret;
 }
 
