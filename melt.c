@@ -50,7 +50,7 @@ int main(int argc, char *argv[])
 	char old_img_tmp[PATH_MAX] = "/tmp/melt_XXXXXX";
 	struct mapped_file f;
 
-	while ((c = getopt(argc, argv, "cwt:i:o:")) != EOF) {
+	while ((c = getopt(argc, argv, "ct:i:o:")) != EOF) {
 		switch (c) {
 		case 'c':
 			compress = true;
