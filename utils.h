@@ -22,19 +22,14 @@
 #include <stdio.h>
 #include <stdbool.h>
 
-struct mapped_file {
-	char *buf;
-	size_t len;
-	int fd;
-};
-
 extern char *append_paths(const char *pre, const char *post);
 extern int file_tar(const char *from, const char *to, bool compress);
 extern int file_tar_move(const char *from, const char *to);
 extern int file_untar(const char *from, const char *to);
 extern char *is_whiteout(char *file);
-extern int mmap_file_as_str(const char *file, struct mapped_file *m);
-extern int munmap_file_as_str(struct mapped_file *m);
+extern void *strmmap(void *addr, size_t length, int prot, int flags, int fd,
+		     off_t offset);
+extern int strmunmap(void *addr, size_t length);
 extern int recursive_rmdir(const char *dirname, bool skip_top);
 extern int rsync_layer(const char *from, const char *to);
 extern int wait_for_pid(pid_t pid);

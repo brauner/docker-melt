@@ -32,9 +32,9 @@
 
 #include "utils.h"
 
-static int extract_ordered_layers(struct mapped_file *manifest, char ***arr);
+static int extract_ordered_layers(char *path, char ***arr);
 static void free_ordered_layer_list(char **arr);
-static int mmap_manifest(const char *path, struct mapped_file *f);
+static char *find_manfiest_json(const char *path);
 static int merge_layers(const char *image_out, const char *old_img_tmp,
 			char **layers, char *tmp_prefix, bool compress);
 static void usage(const char *name);
@@ -48,7 +48,6 @@ int main(int argc, char *argv[])
 	bool compress = false;
 	char *tmp_prefix = "/tmp";
 	char old_img_tmp[PATH_MAX] = "/tmp/melt_XXXXXX";
-	struct mapped_file f;
 
 	while ((c = getopt(argc, argv, "ct:i:o:")) != EOF) {
 		switch (c) {
@@ -86,13 +85,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	ret = mmap_manifest(old_img_tmp, &f);
-	if (ret < 0) {
-		fprintf(stderr, "Failed to inspect manifest.json.\n");
-		goto out;
-	}
-
-	if (extract_ordered_layers(&f, &ordered_layers) < 0) {
+	if (extract_ordered_layers(old_img_tmp, &ordered_layers) < 0) {
 		fprintf(stderr, "Failed to extract layers.\n");
 		goto out;
 	}
@@ -101,12 +94,11 @@ int main(int argc, char *argv[])
 		fprintf(stderr, "Failed merging layers.\n");
 		goto out;
 	}
+
 	fret = 0;
 
 out:
 	recursive_rmdir(old_img_tmp, false);
-	if (!ret)
-		munmap_file_as_str(&f);
 	free_ordered_layer_list(ordered_layers);
 	if (!fret)
 		exit(EXIT_SUCCESS);
@@ -128,17 +120,38 @@ static int add_to_array(char ***arr)
 	return len;
 }
 
-static int extract_ordered_layers(struct mapped_file *manifest, char ***arr)
+static int extract_ordered_layers(char *path, char ***arr)
 {
+	int fd;
+	struct stat fbuf;
 	ssize_t pos = 0;
-	char *layers = strstr(manifest->buf, "\"Layers\":[\"");
+
+	char *manifest_json = find_manfiest_json(path);
+	if (!manifest_json)
+		return -1;
+
+	fd = open(manifest_json, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		goto out_free;
+
+	if (fstat(fd, &fbuf) < 0)
+		goto out_close;
+
+	if (fbuf.st_size == 0)
+		goto out_close;
+
+	char *buf = strmmap(NULL, fbuf.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+	if (buf == MAP_FAILED)
+		goto out_close;
+
+	char *layers = strstr(buf, "\"Layers\":[\"");
 	if (!layers)
-		return -1; // corrupt manifest.json file
+		goto out_unmap; // corrupt manifest.json file
 
 	char *list_start = layers + /* "Layers":[" */ + 10;
 	char *list_end = strchr(list_start, ']');
 	if (!list_end)
-		return -1;
+		goto out_unmap;
 	*list_end = '\0';
 
 	char *a = list_start, *b = list_start;
@@ -146,18 +159,27 @@ static int extract_ordered_layers(struct mapped_file *manifest, char ***arr)
 		a++;
 		b = strchr(a, '"');
 		if (!b)
-			return -1;
+			goto out_unmap;
 		pos = add_to_array(arr);
 		if (pos < 0)
-			return -1;
+			goto out_unmap;
 		size_t len = b - a;
 		(*arr)[pos] = malloc(len + 1);
 		if (!(*arr)[pos])
-			return -1;
+			goto out_unmap;
 		strncpy((*arr)[pos], a, len);
 		(*arr)[pos][len] = '\0'; // strncpy() does not necessarily \0-terminate
 		b++;
 	}
+
+out_unmap:
+	strmunmap(layers, fbuf.st_size);
+
+out_close:
+	close(fd);
+
+out_free:
+	free(manifest_json);
 
 	return 0;
 }
@@ -238,16 +260,15 @@ out_free:
 	return fret;
 }
 
-static int mmap_manifest(const char *path, struct mapped_file *f)
+static char *find_manfiest_json(const char *path)
 {
-	int ret = -1;
 	char *newpath = NULL;
 	struct dirent dirent, *direntp;
 	DIR *dir;
 	// open global directory
 	dir = opendir(path);
 	if (!dir)
-		return -1;
+		return NULL;
 
 	while (!readdir_r(dir, &dirent, &direntp)) {
 		if (!direntp)
@@ -263,15 +284,13 @@ static int mmap_manifest(const char *path, struct mapped_file *f)
 		// create path to layer directory
 		newpath = append_paths(path, direntp->d_name);
 		if (!newpath)
-			return -1;
+			return NULL;
 
-		ret = mmap_file_as_str(newpath, f);
 		break;
 	}
 
-	free(newpath);
 	closedir(dir);
-	return ret;
+	return newpath;
 }
 
 static void usage(const char *name)
