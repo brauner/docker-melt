@@ -101,54 +101,6 @@ char *is_whiteout(char *file)
 	return NULL;
 }
 
-int mmap_file_as_str(const char *file, struct mapped_file *m)
-{
-	char *buf = NULL;
-	struct stat fbuf;
-
-	// open file
-	m->fd = open(file, O_RDWR | O_CLOEXEC);
-	if (m->fd < 0)
-		return -1;
-
-	if (fstat(m->fd, &fbuf) < 0)
-		goto out;
-
-	if (!fbuf.st_size)
-		goto out;
-
-	/* write terminating \0-byte to file. (mmap()ed memory is only null
-	 * terminated when the filesize is not a multiple of the pagesize.) */
-	if (pwrite(m->fd, "", 1, fbuf.st_size) <= 0)
-		goto out;
-
-	// MAP_PRIVATE we don't care about changing the underlying file.
-	buf = mmap(NULL, fbuf.st_size + 1, PROT_READ | PROT_WRITE, MAP_PRIVATE, m->fd, 0);
-	if (buf == MAP_FAILED) {
-		ftruncate(m->fd, fbuf.st_size);
-		goto out;
-	}
-	m->buf = buf;
-	// account for \0
-	m->len = fbuf.st_size + 1;
-	return 0;
-
-out:
-	close(m->fd);
-	return -1;
-}
-
-int munmap_file_as_str(struct mapped_file *m)
-{
-	// include added \0
-	munmap(m->buf, m->len);
-	// truncate to original file size by excluding \0
-	ftruncate(m->fd, m->len - 1);
-	close(m->fd);
-
-	return 0;
-}
-
 int recursive_rmdir(const char *dirname, bool skip_top)
 {
 	struct stat s;
@@ -200,6 +152,33 @@ int recursive_rmdir(const char *dirname, bool skip_top)
 	closedir(dir);
 
 	return err ? -1 : 0;
+}
+
+void *strmmap(void *addr, size_t length, int prot, int flags, int fd,
+	      off_t offset)
+{
+	void *tmp = NULL, *overlap = NULL;
+
+	/* We establish an anonymous mapping that is one byte larger than the
+	 * underlying file. The pages handed to us are zero filled. */
+	tmp = mmap(addr, length + 1, PROT_READ, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	if (tmp == MAP_FAILED)
+		return tmp;
+
+	/* Now we establish a fixed-address mapping starting at the address we
+	 * received from our anonymous mapping and replace all bytes excluding
+	 * the additional \0-byte with the file. This allows us to use normal
+	 * string-handling functions. */
+	overlap = mmap(tmp, length, prot, MAP_FIXED | flags, fd, offset);
+	if (overlap == MAP_FAILED)
+		munmap(tmp, length + 1);
+
+	return overlap;
+}
+
+int strmunmap(void *addr, size_t length)
+{
+	return munmap(addr, length + 1);
 }
 
 int wait_for_pid(pid_t pid)
