@@ -94,7 +94,7 @@ int file_untar(const char *from, const char *to)
 
 char *is_whiteout(char *file)
 {
-	if (!strncmp(file, ".wh.", 4) && strcmp(file, ".wh.")) {
+	if (!strncmp(file, ".wh.", 4) && (file[4] != '\0')) {
 		return file + 4;
 	}
 
