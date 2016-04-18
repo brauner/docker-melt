@@ -1,5 +1,6 @@
-CC=gcc
 CFLAGS=-Wall -std=c99
+DESTDIR=/usr/local
+bindir=/bin
 
 new: clean all
 
@@ -15,3 +16,11 @@ melt.o: melt.c
 clean:
 	rm -rf *.o
 	rm -rf melt
+
+.PHONY: install
+install: melt
+	cp melt $(DESTDIR)$(bindir)/
+
+.PHONY: uninstall
+uninstall: melt
+	rm $(DESTDIR)$(bindir)/melt
