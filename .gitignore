@@ -1,4 +1,4 @@
 reservoir.c
 *.o
-melt
+docker-melt
 *.*

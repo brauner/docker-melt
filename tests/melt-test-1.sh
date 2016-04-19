@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# melt: Minimal tool to squash all layers of a docker image into a single layer 
+# docker-melt: Minimal tool to squash all layers of a docker image into a single
+#              layer 
 
 # Authors:
 # Christian Brauner <christian.brauner@mailbox.org>
@@ -30,7 +31,7 @@ tmpdir2=$(mktemp -d $tmpdir1/melt_XXXX)
 trap "rm -rf $tmpdir1" EXIT INT QUIT PIPE
 docker pull ubuntu:latest
 docker save ubuntu:latest > $tmpdir1/old.tar
-melt -i $tmpdir1/old.tar -o $tmpdir1/new.tar -t $tmpdir2
+docker-melt -i $tmpdir1/old.tar -o $tmpdir1/new.tar -t $tmpdir2
 cat $tmpdir1/new.tar | docker import - melted
 name=$(docker run --rm --hostname ubuntu melted:latest hostname)
 if [ "$name" != "ubuntu" ]; then

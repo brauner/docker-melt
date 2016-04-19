@@ -4,23 +4,23 @@ bindir=/bin
 
 new: clean all
 
-all: utils.o melt.o
-	$(CC) $(CFLAGS) utils.o melt.o -o melt
+all: utils.o docker-melt.o
+	$(CC) $(CFLAGS) utils.o docker-melt.o -o docker-melt
 
 utils.o: utils.c utils.h
 	$(CC) $(CFLAGS) -c utils.c
 
-melt.o: melt.c
-	$(CC) $(CFLAGS) -c melt.c
+docker-melt.o: docker-melt.c
+	$(CC) $(CFLAGS) -c docker-melt.c
 
 clean:
 	rm -rf *.o
-	rm -rf melt
+	rm -rf docker-melt
 
 .PHONY: install
-install: melt
-	cp melt $(DESTDIR)$(bindir)/
+install: docker-melt
+	cp docker-melt $(DESTDIR)$(bindir)/
 
 .PHONY: uninstall
-uninstall: melt
-	rm $(DESTDIR)$(bindir)/melt
+uninstall: docker-melt
+	rm $(DESTDIR)$(bindir)/docker-melt
