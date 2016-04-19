@@ -24,7 +24,6 @@
 
 extern char *append_paths(const char *pre, const char *post);
 extern int file_tar(const char *from, const char *to, bool compress);
-extern int file_tar_move(const char *from, const char *to);
 extern int file_untar(const char *from, const char *to);
 extern char *is_whiteout(char *file);
 extern void *strmmap(void *addr, size_t length, int prot, int flags, int fd,
