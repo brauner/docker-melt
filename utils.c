@@ -101,7 +101,8 @@ char *is_whiteout(char *file)
 	return NULL;
 }
 
-int recursive_rmdir(const char *dirname, bool skip_top)
+int recursive_rmdir(const char *dirname, const char *exclude,
+		    unsigned int nested, bool skip_top)
 {
 	struct stat s;
 	struct dirent dirent, *direntp;
@@ -124,6 +125,9 @@ int recursive_rmdir(const char *dirname, bool skip_top)
 		    !strcmp(direntp->d_name, ".."))
 			continue;
 
+		if (!nested && exclude && !strcmp(direntp->d_name, exclude))
+			continue;
+
 		rc = snprintf(delete, PATH_MAX, "%s/%s", dirname, direntp->d_name);
 		if (rc < 0 || rc >= PATH_MAX) {
 			err = true;
@@ -137,7 +141,7 @@ int recursive_rmdir(const char *dirname, bool skip_top)
 		}
 
 		if (S_ISDIR(s.st_mode)) {
-			if (recursive_rmdir(delete, skip_top) < 0)
+			if (recursive_rmdir(delete, exclude, nested + 1, skip_top) < 0)
 				err = true;
 		} else {
 			if (unlink(delete) < 0)
@@ -238,7 +242,7 @@ int delete_whiteouts(const char *oldpath, const char *newpath)
 			if (ret)
 				continue;
 			if (S_ISDIR(s.st_mode)) {
-				if (recursive_rmdir(delete, false) < 0)
+				if (recursive_rmdir(delete, NULL, 0, false) < 0)
 					err = true;
 			} else {
 				if (unlink(delete) < 0)

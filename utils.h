@@ -29,7 +29,8 @@ extern char *is_whiteout(char *file);
 extern void *strmmap(void *addr, size_t length, int prot, int flags, int fd,
 		     off_t offset);
 extern int strmunmap(void *addr, size_t length);
-extern int recursive_rmdir(const char *dirname, bool skip_top);
+extern int recursive_rmdir(const char *dirname, const char *exclude,
+			   unsigned int nested, bool skip_top);
 extern int rsync_layer(const char *from, const char *to);
 extern int wait_for_pid(pid_t pid);
 extern int delete_whiteouts(const char *oldpath, const char *newpath);
