@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/brauner/melt.svg?branch=master)](https://travis-ci.org/brauner/melt)
+[![Build Status](https://travis-ci.org/brauner/docker-melt.svg?branch=master)](https://travis-ci.org/brauner/docker-melt)
 
 `docker-melt` is a simple tool to merge all layers of a Docker image into
 a single layer. It tries to do as little as possible to achieve the result
