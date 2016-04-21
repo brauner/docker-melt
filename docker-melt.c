@@ -36,7 +36,7 @@ static int extract_ordered_layers(char *path, char ***arr);
 static void free_ordered_layer_list(char **arr);
 static char *find_manfiest_json(const char *path);
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char **layers, char *tmp_prefix, bool compress);
+			char **layers, bool compress);
 static void usage(const char *name);
 
 
@@ -90,7 +90,7 @@ int main(int argc, char *argv[])
 		goto out;
 	}
 
-	if (merge_layers(image_out, old_img_tmp, ordered_layers, tmp_prefix, compress) < 0) {
+	if (merge_layers(image_out, old_img_tmp, ordered_layers, compress) < 0) {
 		fprintf(stderr, "Failed merging layers.\n");
 		goto out;
 	}
@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
 	fret = 0;
 
 out:
-	recursive_rmdir(old_img_tmp, false);
+	recursive_rmdir(old_img_tmp, NULL, 0, false);
 	free_ordered_layer_list(ordered_layers);
 	if (!fret)
 		exit(EXIT_SUCCESS);
@@ -197,66 +197,86 @@ static void free_ordered_layer_list(char **arr)
 }
 
 static int merge_layers(const char *image_out, const char *old_img_tmp,
-			char **layers, char *tmp_prefix, bool compress)
+			char **layers, bool compress)
 {
-	int fret = -1;
-	char *path = NULL, *tmp1 = NULL, *tmp2 = NULL;
-
-	tmp1 = append_paths(tmp_prefix, "melt_XXXXXX");
-	if (!tmp1)
-		goto out_free;
-
-	tmp2 = append_paths(tmp_prefix, "melt_XXXXXX");
-	if (!tmp2)
-		goto out_free;
-
-	if (!mkdtemp(tmp1))
-		goto out_free;
-	if (chmod(tmp1, 0755) < 0)
-		goto out_rm_tmp1;
-
-	if (!mkdtemp(tmp2))
-		goto out_rm_tmp1;
-	if (chmod(tmp2, 0755) < 0)
-		goto out_rm_tmp2;
+	int ret, fret = -1;
+	size_t len;
+	char *tmp, *curpath = NULL, *layertar = NULL, *rootlayer = NULL;
 
 	for (; layers && *layers; layers++) {
-		path = append_paths(old_img_tmp, *layers);
-		if (!path)
-			goto out_rm_tmp2;
-		if (file_untar(path, tmp2) < 0) {
-			free(path);
-			goto out_rm_tmp2;
+		layertar = append_paths(old_img_tmp, *layers);
+		if (!layertar)
+			goto out_rm_rootlayer;
+
+		len = strlen(*layers) - /* layer.tar */ 9;
+		tmp = strndup(*layers, len);
+		if (!tmp)
+			goto out_rm_rootlayer;
+
+		curpath = append_paths(old_img_tmp, tmp);
+		free(tmp);
+		if (!curpath) {
+			free(layertar);
+			goto out_rm_rootlayer;
 		}
-		/* save space by immediately deleting layers we've already
-		 * untared. */
-		if (unlink(path) < 0) {
-			free(path);
-			goto out_rm_tmp2;
+
+		// Delete all files from current layer excluding layer.tar file.
+		if (recursive_rmdir(curpath, "layer.tar", 0, true) < 0) {
+			free(curpath);
+			free(layertar);
+			goto out_rm_rootlayer;
 		}
-		free(path);
-		// rsync and only leave whiteout files behind
-		if (rsync_layer(tmp2, tmp1) < 0)
-			goto out_rm_tmp2;
-		if (delete_whiteouts(tmp2, tmp1) < 0)
-			goto out_rm_tmp2;
-		// empty contents of tmp dir but leave itself intact
-		if (recursive_rmdir(tmp2, true) < 0)
-			goto out_rm_tmp2;
+
+		// Untar layer in its folder.
+		if (file_untar(layertar, curpath) < 0) {
+			free(curpath);
+			free(layertar);
+			goto out_rm_rootlayer;
+		}
+
+		// Delete layer.tar file.
+		ret = unlink(layertar);
+		free(layertar);
+		if (ret < 0) {
+			free(curpath);
+			goto out_rm_rootlayer;
+		}
+
+		// Store the rootlayer.
+		if (!rootlayer) {
+			rootlayer = strdup(curpath);
+			free(curpath);
+			if (!rootlayer)
+				goto out_rm_rootlayer;
+			continue;
+		}
+
+		// rsync to root layer and only leave whiteout files behind.
+		if (rsync_layer(curpath, rootlayer) < 0) {
+			free(curpath);
+			goto out_rm_rootlayer;
+		}
+
+		if (delete_whiteouts(curpath, rootlayer) < 0) {
+			free(curpath);
+			goto out_rm_rootlayer;
+		}
+
+		// Delete current layer.
+		ret = recursive_rmdir(curpath, NULL, 0, false);
+		free(curpath);
+		if (ret < 0)
+			goto out_rm_rootlayer;
 	}
 
-	if (file_tar(tmp1, image_out, compress) < 0)
-		goto out_rm_tmp2;
+	if (file_tar(rootlayer, image_out, compress) < 0)
+		goto out_rm_rootlayer;
 
 	fret = 0;
 
-out_rm_tmp2:
-	recursive_rmdir(tmp2, false);
-out_rm_tmp1:
-	recursive_rmdir(tmp1, false);
-out_free:
-	free(tmp1);
-	free(tmp2);
+out_rm_rootlayer:
+	recursive_rmdir(rootlayer, NULL, 0, false);
+	free(rootlayer);
 	return fret;
 }
 
