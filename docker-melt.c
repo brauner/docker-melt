@@ -112,7 +112,7 @@ static int add_to_array(char ***arr)
 		for (; (*arr)[len]; len++)
 			;
 
-	char **tmp = realloc(*arr, (len + 2) * sizeof(char **));
+	char **tmp = realloc(*arr, (len + 2) * sizeof(char *));
 	if (!tmp)
 		return -1;
 	*arr = tmp;
@@ -154,7 +154,7 @@ static int extract_ordered_layers(char *path, char ***arr)
 		goto out_unmap;
 	*list_end = '\0';
 
-	char *a = list_start, *b = list_start;
+	char *a, *b = list_start;
 	while ((a = strchr(b, '"'))) {
 		a++;
 		b = strchr(a, '"');
