@@ -282,8 +282,10 @@ out_rm_rootlayer:
 
 static char *find_manfiest_json(const char *path)
 {
+	int ret;
 	char *newpath = NULL;
 	struct dirent dirent, *direntp;
+	struct stat s;
 	DIR *dir;
 	// open global directory
 	dir = opendir(path);
@@ -297,6 +299,11 @@ static char *find_manfiest_json(const char *path)
 		if (!strcmp(direntp->d_name, ".") ||
 		    !strcmp(direntp->d_name, ".."))
 			continue;
+
+		ret = lstat(direntp->d_name, &s);
+		if (ret > 0)
+			if (S_ISDIR(s.st_mode))
+				continue;
 
 		if (strcmp(direntp->d_name, "manifest.json"))
 			continue;
