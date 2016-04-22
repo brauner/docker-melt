@@ -40,6 +40,15 @@ if [ "$name" != "ubuntu" ]; then
 	exit 1
 fi
 
+premelt=$(docker history ubuntu:latest | wc -l)
+postmelt=$(docker history melted:latest | wc -l)
+
+if [ "$postmelt" -ne 2 ] || [ "$premelt" -eq 2 ] ;then
+	docker rmi melted:latest
+	rm -rf $tmpdir1
+	exit 1
+fi
+
 docker rmi melted:latest
 rm -rf $tmpdir1
 exit 0
