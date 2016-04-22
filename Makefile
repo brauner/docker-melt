@@ -1,4 +1,4 @@
-CFLAGS=-Wall -std=c99
+CFLAGS=-Wall -O2 -std=c99
 DESTDIR=/usr/local
 bindir=/bin
 
