@@ -1,3 +1,5 @@
+#### **Checkout [`go-docker-melt`](https://github.com/brauner/go-docker-melt). It provides more features than `docker-melt`: `go-docker-melt` handles multiple images in a single tar archive created via `docker save` and creates a tar archive that can be imported via `docker load`.**
+
 [![Build Status](https://travis-ci.org/brauner/docker-melt.svg?branch=master)](https://travis-ci.org/brauner/docker-melt)
 
 `docker-melt` is a simple tool to merge all layers of a Docker image into
